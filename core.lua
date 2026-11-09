@@ -5,10 +5,41 @@ local isRU = GetLocale() == "ruRU"
 local ITEM_LABEL = isRU and "ID предмета:" or "ItemID:"
 local SPELL_LABEL = isRU and "ID заклинания:" or "SpellID:"
 
+-- Explicit state machine for "what is currently shown in this tooltip".
+-- status: "idle" | "shown"; value: last shown id. Keeping item and spell
+-- slots separate prevents one kind from suppressing the other.
+local function newStateSlot() return { status = "idle", value = nil } end
+
+local function getState(self)
+	if not self.idTipMachine then
+		self.idTipMachine = { item = newStateSlot(), spell = newStateSlot() }
+	end
+	return self.idTipMachine
+end
+
+local function transition(slot, event)
+	if event.type == "RESET" then
+		slot.status = "idle"
+		slot.value = nil
+		return true
+	end
+	if event.type == "SHOW" then
+		if slot.status == "shown" and slot.value == event.value then
+			return false -- duplicate, suppress
+		end
+		slot.status = "shown"
+		slot.value = event.value
+		return true
+	end
+	return false
+end
+
 local function addLine(self, id, isItem)
-	local field = isItem and "idTipLastItem" or "idTipLastSpell"
-	if self[field] == id then return end
-	self[field] = id
+	local machine = getState(self)
+	local slot = isItem and machine.item or machine.spell
+	if not transition(slot, { type = "SHOW", value = id }) then
+		return
+	end
 
 	if isItem then
 		self:AddDoubleLine(ITEM_LABEL, "|cffffffff" .. id .. "|r")
@@ -19,8 +50,10 @@ local function addLine(self, id, isItem)
 end
 
 local function clearIdTip(self)
-	self.idTipLastItem = nil
-	self.idTipLastSpell = nil
+	local machine = self.idTipMachine
+	if not machine then return end
+	transition(machine.item, { type = "RESET" })
+	transition(machine.spell, { type = "RESET" })
 end
 
 -- Spell Hooks ----------------------------------------------------------------
